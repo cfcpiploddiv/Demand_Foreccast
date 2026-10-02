@@ -1280,7 +1280,7 @@ export function executeFullPipeline(
   });
 
   // Forecast points sample
-  const testForecastSample: ForecastPoint[] = testRecords.slice(0, 240).map((r, i) => ({
+  const testForecastSample: ForecastPoint[] = testRecords.map((r, i) => ({
     datetime: r.timestampStr,
     actual: r.targetMW,
     predicted: predXGBTuned[i],

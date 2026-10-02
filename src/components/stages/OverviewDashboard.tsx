@@ -37,12 +37,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
     ? +(((naiveModel.metrics.mae - bestModel.metrics.mae) / naiveModel.metrics.mae) * 100).toFixed(1)
     : 0;
 
-  // Forecast Filter State
-  const [viewMode, setViewMode] = useState<'all' | 'date' | 'week' | 'month'>('all');
-  const [selectedDate, setSelectedDate] = useState<string>('');
-  const [selectedWeek, setSelectedWeek] = useState<number>(1);
-  const [selectedMonth, setSelectedMonth] = useState<string>('');
-
   // Custom Predictor state requested in prompt
   const [customWeather, setCustomWeather] = useState<string>('Sunny');
   const [customHoliday, setCustomHoliday] = useState<string>('None');
@@ -86,75 +80,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
   }, [customWeather, customHoliday, customFestival, customTemp, customHumidity, bestModel.metrics.r2, bestModel.metrics.mae]);
 
   const testForecastSample = errorAnalysis.testForecastSample;
-
-  // Extract unique dates (YYYY-MM-DD) from testForecastSample
-  const uniqueDates = useMemo(() => {
-    const dates = new Set<string>();
-    testForecastSample.forEach(pt => {
-      if (pt.datetime && pt.datetime.length >= 10) {
-        dates.add(pt.datetime.slice(0, 10));
-      }
-    });
-    return Array.from(dates).sort();
-  }, [testForecastSample]);
-
-  // Extract unique months (MM) from testForecastSample
-  const uniqueMonths = useMemo(() => {
-    const months = new Set<string>();
-    testForecastSample.forEach(pt => {
-      if (pt.datetime && pt.datetime.length >= 7) {
-        months.add(pt.datetime.slice(5, 7));
-      }
-    });
-    return Array.from(months).sort();
-  }, [testForecastSample]);
-
-  // Initialize selected default values when lists are populated
-  React.useEffect(() => {
-    if (uniqueDates.length > 0 && !selectedDate) {
-      setSelectedDate(uniqueDates[0]);
-    }
-  }, [uniqueDates, selectedDate]);
-
-  React.useEffect(() => {
-    if (uniqueMonths.length > 0 && !selectedMonth) {
-      setSelectedMonth(uniqueMonths[0]);
-    }
-  }, [uniqueMonths, selectedMonth]);
-
-  // Compute number of weeks based on 168 hours blocks
-  const totalWeeks = Math.ceil(testForecastSample.length / 168);
-
-  // Month translation helper
-  const getMonthName = (mCode: string) => {
-    const monthNames: { [key: string]: string } = {
-      '01': 'January', '02': 'February', '03': 'March', '04': 'April',
-      '05': 'May', '06': 'June', '07': 'July', '08': 'August',
-      '09': 'September', '10': 'October', '11': 'November', '12': 'December'
-    };
-    return monthNames[mCode] || `Month (${mCode})`;
-  };
-
-  // Filter Data based on date/week/month selection
-  const filteredData = useMemo(() => {
-    if (viewMode === 'all') return testForecastSample;
-
-    if (viewMode === 'date') {
-      return testForecastSample.filter(pt => pt.datetime.startsWith(selectedDate));
-    }
-
-    if (viewMode === 'week') {
-      const startIdx = (selectedWeek - 1) * 168;
-      const endIdx = selectedWeek * 168;
-      return testForecastSample.slice(startIdx, endIdx);
-    }
-
-    if (viewMode === 'month') {
-      return testForecastSample.filter(pt => pt.datetime.slice(5, 7) === selectedMonth);
-    }
-
-    return testForecastSample;
-  }, [testForecastSample, viewMode, selectedDate, selectedWeek, selectedMonth]);
+  const filteredData = testForecastSample;
 
   // Sliced period stats & metrics recalculation
   const selectionMetrics = useMemo(() => {
@@ -229,11 +155,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
   // Table Pagination state
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 10;
-
-  // Reset page when selection mode or filter changes
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [viewMode, selectedDate, selectedWeek, selectedMonth]);
 
   // Calculate detailed forecast outcomes: Bias, Under/Over prediction counts
   const detailBreakdown = useMemo(() => {
@@ -344,168 +265,9 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
         </div>
       </div>
 
-      {/* FORECAST DATE / WEEK / MONTH CONTROLLER PANEL */}
+      {/* Interactive Custom Dispatch Load Predictor Form */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-cyan-400" />
-              Grid Dispatch Forecast Navigator
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Select date, week, or monthly slices to reveal localized forecast curves & dynamic operating KPIs
-            </p>
-          </div>
-
-          {/* Mode Switcher */}
-          <div className="flex bg-slate-950 p-1 rounded-lg text-xs border border-slate-800">
-            {[
-              { id: 'all', label: 'Full Horizon' },
-              { id: 'date', label: 'By Specific Date' },
-              { id: 'week', label: 'By Specific Week' },
-              { id: 'month', label: 'By Specific Month' },
-            ].map(m => (
-              <button
-                key={m.id}
-                onClick={() => setViewMode(m.id as any)}
-                className={`px-3 py-1 rounded-md font-semibold transition-colors ${
-                  viewMode === m.id
-                    ? 'bg-cyan-600 text-white font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Dynamic Parameter Selector Dropdown / Row */}
-        {viewMode !== 'all' && (
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 text-xs flex items-center gap-3">
-            <span className="text-slate-400 font-semibold font-mono">Select Target Slice:</span>
-
-            {viewMode === 'date' && uniqueDates.length > 0 && (
-              <select
-                value={selectedDate}
-                onChange={e => setSelectedDate(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-200 font-mono font-medium focus:ring-1 focus:ring-cyan-500"
-              >
-                {uniqueDates.map(d => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {viewMode === 'week' && (
-              <div className="flex flex-wrap gap-1.5">
-                {Array.from({ length: totalWeeks }, (_, idx) => idx + 1).map(wk => (
-                  <button
-                    key={wk}
-                    onClick={() => setSelectedWeek(wk)}
-                    className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
-                      selectedWeek === wk
-                        ? 'bg-cyan-600 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    Week {wk} (Hours { (wk - 1) * 168 } - { Math.min(testForecastSample.length, wk * 168) - 1 })
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {viewMode === 'month' && uniqueMonths.length > 0 && (
-              <div className="flex gap-1.5">
-                {uniqueMonths.map(mCode => (
-                  <button
-                    key={mCode}
-                    onClick={() => setSelectedMonth(mCode)}
-                    className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
-                      selectedMonth === mCode
-                        ? 'bg-cyan-600 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    {getMonthName(mCode)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Selection-Based Dynamic Outcomes Panel */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
-          {/* Average & Peaks */}
-          <div className="space-y-1">
-            <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Slice Grid Loads</span>
-            <div className="font-mono text-sm space-y-1 text-slate-200">
-              <div className="flex justify-between">
-                <span>Average:</span> <span className="font-bold text-cyan-300">{selectionMetrics.avgLoad} MW</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Maximum Peak:</span> <span className="font-bold text-rose-400">{selectionMetrics.maxLoad} MW</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Minimum Valley:</span> <span className="font-bold text-emerald-400">{selectionMetrics.minLoad} MW</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Model Accuracy Outcome */}
-          <div className="space-y-1">
-            <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Forecast Outcome Accuracy</span>
-            <div className="font-mono text-sm space-y-1 text-slate-200">
-              <div className="flex justify-between">
-                <span>Period MAE:</span> <span className="font-bold text-cyan-300">{selectionMetrics.mae} MW</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Period RMSE:</span> <span className="text-slate-300">{selectionMetrics.rmse} MW</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Period R² Score:</span> <span className="font-bold text-amber-300">{selectionMetrics.r2}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Energy Transferred */}
-          <div className="space-y-1">
-            <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Total Energy Dispatched</span>
-            <div className="text-2xl font-bold font-mono text-white mt-1.5">
-              {selectionMetrics.totalEnergyMWh.toLocaleString()}{' '}
-              <span className="text-xs font-normal text-slate-400">MWh</span>
-            </div>
-            <span className="text-[10px] text-slate-400 block">Accumulated load hours</span>
-          </div>
-
-          {/* Peak Grid Alarms */}
-          <div className="space-y-1 flex flex-col justify-center">
-            <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Grid Stability Alert Status</span>
-            <div className="flex items-center gap-2 mt-1.5">
-              {selectionMetrics.peakHoursCount > 0 ? (
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 font-bold text-xs animate-pulse">
-                  <Flame className="w-3.5 h-3.5 text-rose-400" />
-                  {selectionMetrics.peakHoursCount} Peak Hours Active
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-bold text-xs">
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  Stable (0 Peak Hours)
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] text-slate-400 mt-1 block font-semibold font-sans">
-              State: <span className="text-slate-200">{selectionMetrics.status}</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Interactive Custom Predictor form requested in prompt */}
-        <div className="border-t border-slate-800/80 pt-5 mt-5 space-y-4">
-          <div>
+        <div>
             <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
               <Zap className="w-4 h-4 text-amber-400" />
               Interactive Custom Dispatch Load Predictor Form
@@ -623,7 +385,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
             </div>
           </div>
         </div>
-      </div>
 
       {/* Primary Forecast Chart (Filtered by Selection Mode) */}
       <div className="space-y-2">

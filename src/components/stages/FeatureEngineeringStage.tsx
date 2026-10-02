@@ -2,6 +2,7 @@ import React from 'react';
 import { ShieldCheck, CheckCircle2, Cpu, Clock, Calendar, AlertCircle } from 'lucide-react';
 import { PipelineResults } from '../../types/pipeline';
 import { CorrelationHeatmap } from '../charts/CorrelationHeatmap';
+import { ErrorContributionChart } from '../charts/ErrorContributionChart';
 
 interface FeatureEngineeringStageProps {
   results: PipelineResults;
@@ -155,6 +156,9 @@ export const FeatureEngineeringStage: React.FC<FeatureEngineeringStageProps> = (
           </div>
         </div>
       </div>
+
+      {/* Error Contribution & Interpretability Workbench */}
+      <ErrorContributionChart />
     </div>
   );
 };

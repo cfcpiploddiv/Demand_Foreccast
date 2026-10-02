@@ -12,28 +12,31 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   peakThreshold,
   height = 320,
 }) => {
-  const [sliceLength, setSliceLength] = useState<number>(168);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   if (!data || data.length === 0) {
     return <div className="p-8 text-center text-slate-400">No time series data available</div>;
   }
 
-  // If passed data is already smaller than or equal to sliceLength, or if user wants to see full selection
-  const actualSliceLength = Math.min(data.length, sliceLength);
-  const visibleData = data.slice(0, actualSliceLength);
+  // Always show all data as requested
+  const visibleData = data;
 
   // Determine min & max Y
   const allY = visibleData.flatMap(d => [d.actual, d.predicted]);
   if (peakThreshold) allY.push(peakThreshold);
-  const minY = Math.floor(Math.min(...allY) * 0.95);
-  const maxY = Math.ceil(Math.max(...allY) * 1.05);
+  
+  const minVal = Math.min(...allY);
+  const maxVal = Math.max(...allY);
+  
+  // Provide enough vertical breathing room
+  const minY = Math.floor(minVal * 0.95);
+  const maxY = Math.ceil(maxVal * 1.1);
   const rangeY = maxY - minY || 1;
 
   const paddingLeft = 60;
   const paddingRight = 30;
   const paddingTop = 25;
-  const paddingBottom = 40;
+  const paddingBottom = 45;
   const chartWidth = 900;
   const chartHeight = height;
 
@@ -41,7 +44,8 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   const innerHeight = chartHeight - paddingTop - paddingBottom;
 
   const getX = (index: number) => {
-    return paddingLeft + (index / Math.max(1, visibleData.length - 1)) * innerWidth;
+    if (visibleData.length <= 1) return paddingLeft + innerWidth / 2;
+    return paddingLeft + (index / (visibleData.length - 1)) * innerWidth;
   };
 
   const getY = (val: number) => {
@@ -69,6 +73,28 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
 
   const hoveredPoint = hoverIndex !== null && visibleData[hoverIndex] ? visibleData[hoverIndex] : null;
 
+  // X-axis label formatter for "All Data" view
+  const formatXLabel = (dateStr: string) => {
+    // format expected: "YYYY-MM-DD HH:mm" or "DD-MM-YYYY HH:mm"
+    const parts = dateStr.split(' ');
+    const date = parts[0];
+    const dateParts = date.split(/[-/]/);
+    
+    let day, month, year;
+    if (dateParts[0].length === 4) {
+      // YYYY-MM-DD
+      year = dateParts[0];
+      month = dateParts[1];
+      day = dateParts[2];
+    } else {
+      // DD-MM-YYYY
+      day = dateParts[0];
+      month = dateParts[1];
+      year = dateParts[2];
+    }
+    return `${day}/${month}/${year.slice(-2)}`;
+  };
+
   return (
     <div className="w-full bg-slate-900 border border-slate-800 rounded-xl p-4 text-slate-200">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -88,26 +114,9 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             </div>
           )}
         </div>
-
-        <div className="flex items-center gap-1.5 bg-slate-800/80 p-1 rounded-lg text-xs">
-          <span className="text-slate-400 px-2">Horizon:</span>
-          {[24, 72, 168, 720, 10000].map(cnt => (
-            <button
-              key={cnt}
-              onClick={() => setSliceLength(cnt)}
-              className={`px-2.5 py-1 rounded font-medium transition-colors ${
-                sliceLength === cnt
-                  ? 'bg-cyan-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
-              }`}
-            >
-              {cnt === 24 ? '24h' : cnt === 72 ? '3 Days' : cnt === 168 ? '1 Week' : cnt === 720 ? '1 Month' : 'All Data'}
-            </button>
-          ))}
-        </div>
       </div>
 
-      <div className="relative overflow-x-auto">
+      <div className="relative">
         <svg
           viewBox={`0 0 ${chartWidth} ${chartHeight}`}
           className="w-full select-none"
@@ -140,7 +149,7 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
                 x={paddingLeft - 8}
                 y={t.y + 4}
                 textAnchor="end"
-                className="text-[10px] fill-slate-400 font-mono"
+                className="text-[10px] fill-slate-400 font-mono tabular-nums"
               >
                 {t.val}
               </text>
@@ -165,7 +174,7 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             d={actualPath}
             fill="none"
             stroke="#22d3ee"
-            strokeWidth={2.2}
+            strokeWidth={1.5}
             strokeLinejoin="round"
             strokeLinecap="round"
           />
@@ -175,8 +184,8 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             d={predictedPath}
             fill="none"
             stroke="#fbbf24"
-            strokeWidth={1.8}
-            strokeDasharray="4 3"
+            strokeWidth={1.2}
+            strokeDasharray="3 2"
             strokeLinejoin="round"
             strokeLinecap="round"
           />
@@ -196,7 +205,7 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
               <circle
                 cx={getX(hoverIndex)}
                 cy={getY(hoveredPoint.actual)}
-                r={4.5}
+                r={4}
                 fill="#22d3ee"
                 stroke="#0f172a"
                 strokeWidth={2}
@@ -204,7 +213,7 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
               <circle
                 cx={getX(hoverIndex)}
                 cy={getY(hoveredPoint.predicted)}
-                r={4.5}
+                r={4}
                 fill="#fbbf24"
                 stroke="#0f172a"
                 strokeWidth={2}
@@ -214,8 +223,13 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
 
           {/* Time axis labels */}
           {visibleData.map((d, i) => {
-            const step = Math.max(1, Math.floor(visibleData.length / 8));
+            const labelCount = 8;
+            const step = Math.max(1, Math.floor(visibleData.length / (labelCount - 1)));
             if (i % step !== 0 && i !== visibleData.length - 1) return null;
+            
+            // Avoid overlapping the last label if it's too close
+            if (i !== visibleData.length - 1 && (visibleData.length - 1 - i) < step * 0.5) return null;
+
             return (
               <text
                 key={i}
@@ -224,7 +238,7 @@ export const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
                 textAnchor="middle"
                 className="text-[10px] fill-slate-400 font-mono"
               >
-                {d.datetime.slice(5, 16)}
+                {formatXLabel(d.datetime)}
               </text>
             );
           })}

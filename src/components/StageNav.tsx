@@ -36,7 +36,7 @@ export const StageNav: React.FC<StageNavProps> = ({ activeTab, onSelectTab, hasR
     { id: 'export_model', label: 'Export Model (.onnx/.pkl)', icon: Download, badge: 'Deploy' },
     { id: 'peak_error', label: '10-12. Peak & Residuals', icon: Activity, badge: 'Diagnostics' },
     { id: 'simulator', label: 'What-If Simulator', icon: Gauge, badge: 'Tool' },
-    { id: 'code_export', label: 'Python Script & Viva', icon: Code, badge: '.py' },
+    { id: 'code_export', label: 'Python', icon: Code, badge: '.py' },
   ];
 
   return (
