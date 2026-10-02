@@ -66,12 +66,11 @@ export default function App() {
 
   const handleApplyCorrection = () => {
     const logs = [
-      { column: 'timestamp', before: '14 duplicate timestamps (same hour)', action: 'Aggregated duplicate load rows, averaged load_MW values', after: 'Standardized chronologically unique series', status: 'Fixed' },
-      { column: 'load_MW', before: '3 blank rows, 1 outlier value (>5000 MW)', action: 'Interpolated blank rows; capped extreme noise to 99th percentile', after: 'Normalized load range [1100, 3100 MW]', status: 'Fixed' },
-      { column: 'Temp', before: '18 missing values (NaN / Null)', action: 'Imputed missing points using 3-hour forward-rolling averages', after: 'Fully imputed [no missing Temp values]', status: 'Imputed' },
-      { column: 'Humidity', before: '11 empty records', action: 'Populated with local seasonal climatology average (55.4%)', after: 'Standardized continuous values', status: 'Imputed' },
-      { column: 'Holiday Type', before: 'Malformed strings ("nat-hol", "  Holiday ")', action: 'Standardized text casing, stripped trailing whitespaces', after: 'Clean categorical keys ["National Holiday", "None"]', status: 'Standardized' },
-      { column: 'Festival Name', before: 'Inconsistent "none" / blank records', action: 'Mapped empty fields to "None" keyword for categorical embedding', after: 'Clean categorical series', status: 'Standardized' },
+      { column: 'Timeline', before: 'Irregular sampling / missing hours', action: 'Gap-filling to enforce regular 1-hour intervals', after: 'Continuous time-series structure', status: 'Aligned' },
+      { column: 'Temp/Humidity', before: 'Physically impossible outliers (e.g. 235°C)', action: 'Outliers converted to NaN (null) to preserve record', after: 'Replaced with time-aware estimates', status: 'Corrected' },
+      { column: 'Short Gaps', before: '1-3 hour sensor drops', action: 'Linear time-based interpolation', after: 'Pattern preserved', status: 'Interpolated' },
+      { column: 'Long Gaps', before: 'Extended sensor downtime (>3 hrs)', action: 'Same-hour historical median imputation', after: 'Daily profile maintained', status: 'Imputed' },
+      { column: 'MW Load', before: 'Missing demand observations', action: 'Time-aware historical profile matching', after: 'No null load values', status: 'Healed' },
     ];
     setCorrectedLogs(logs);
     runPipeline(csvContent, mapping, hyperparameters, true);
@@ -227,9 +226,11 @@ export default function App() {
               <DataQualityStage
                 quality={pipelineResults.quality}
                 stats={pipelineResults.stats}
+                cleanedData={pipelineResults.cleanedData}
                 correctedLogs={correctedLogs}
                 onApplyCorrection={handleApplyCorrection}
                 onUndoCorrection={handleUndoCorrection}
+                filename={activeFilename}
               />
             )}
 

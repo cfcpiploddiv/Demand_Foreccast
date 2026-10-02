@@ -26,6 +26,7 @@ export interface DataQualityReport {
   columns: {
     name: string;
     missingCount: number;
+    outlierCount?: number;
     missingPercent: number;
     dataType: string;
   }[];
@@ -185,9 +186,20 @@ export interface ForecastPoint {
   isPeak: boolean;
 }
 
+export interface CleanedRow {
+  datetime: string;
+  mw: number;
+  temp: number;
+  humidity: number;
+  weather: string;
+  holiday: string;
+  festival: string;
+}
+
 export interface PipelineResults {
   quality: DataQualityReport;
   stats: DescriptiveStats[];
+  cleanedData: CleanedRow[];
   demandOverview: {
     avgDemand: number;
     maxDemand: number;

@@ -236,9 +236,9 @@ export function executeFullPipeline(
   const totalRows = validRawRows.length;
   let duplicateCount = 0;
   
-  const columnStats: { [col: string]: { missing: number; type: string } } = {};
+  const columnStats: { [col: string]: { missing: number; outliers: number; type: string } } = {};
   headers.forEach(h => {
-    columnStats[h] = { missing: 0, type: 'string' };
+    columnStats[h] = { missing: 0, outliers: 0, type: 'string' };
   });
 
   // 1.1 Initial Parse & Group by Hour
@@ -265,9 +265,30 @@ export function executeFullPipeline(
     if (dt) {
       // Round to top of hour
       const hourTs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), dt.getHours()).getTime();
-      const mw = parseFloat(row[mapping.loadCol]);
-      const temp = mapping.tempCol ? parseFloat(row[mapping.tempCol]) : NaN;
-      const humidity = mapping.humidityCol ? parseFloat(row[mapping.humidityCol]) : NaN;
+      
+      // Initial parse
+      let mw = parseFloat(row[mapping.loadCol]);
+      let temp = mapping.tempCol ? parseFloat(row[mapping.tempCol]) : NaN;
+      let humidity = mapping.humidityCol ? parseFloat(row[mapping.humidityCol]) : NaN;
+
+      // --- Physical & Statistical Constraint Validation (Outlier Detection) ---
+      // 1. Demand (MW) must be non-negative. Extreme spikes (>20,000 MW) treated as noise.
+      if (!isNaN(mw) && (mw < 0 || mw > 20000)) {
+        if (mapping.loadCol) columnStats[mapping.loadCol].outliers++;
+        mw = NaN;
+      }
+      
+      // 2. Temperature (°C) must be within realistic terrestrial bounds (-50 to 60)
+      if (!isNaN(temp) && (temp < -50 || temp > 60)) {
+        if (mapping.tempCol) columnStats[mapping.tempCol].outliers++;
+        temp = NaN;
+      }
+      
+      // 3. Humidity (%) is physically bounded between 0 and 100
+      if (!isNaN(humidity) && (humidity < 0 || humidity > 100)) {
+        if (mapping.humidityCol) columnStats[mapping.humidityCol].outliers++;
+        humidity = NaN;
+      }
 
       if (!hourlyDataMap.has(hourTs)) {
         hourlyDataMap.set(hourTs, { mw: [], temp: [], humidity: [], weather: [], holiday: [], festival: [] });
@@ -284,7 +305,48 @@ export function executeFullPipeline(
     }
   });
 
-  // 1.2 Chronological Range
+  // 1.2 Statistical Outlier Filtering (IQR) for Temp/Humidity
+  const collectValues = (col?: string): number[] => {
+    if (!col) return [];
+    return validRawRows.map(r => parseFloat(r[col])).filter(v => !isNaN(v));
+  };
+
+  const getIQRBounds = (vals: number[]) => {
+    if (vals.length < 4) return { low: -Infinity, high: Infinity };
+    const sorted = [...vals].sort((a, b) => a - b);
+    const q1 = quantile(sorted, 0.25);
+    const q3 = quantile(sorted, 0.75);
+    const iqr = q3 - q1;
+    return { low: q1 - 1.5 * iqr, high: q3 + 1.5 * iqr };
+  };
+
+  const tempBounds = getIQRBounds(collectValues(mapping.tempCol));
+  const humidBounds = getIQRBounds(collectValues(mapping.humidityCol));
+
+  // Update hourlyDataMap with IQR filtered values
+  hourlyDataMap.forEach((bucket) => {
+    // Filter Temp
+    const filteredTemp = bucket.temp.filter(v => {
+      if (v < tempBounds.low || v > tempBounds.high) {
+        if (mapping.tempCol) columnStats[mapping.tempCol].outliers++;
+        return false;
+      }
+      return true;
+    });
+    bucket.temp = filteredTemp;
+
+    // Filter Humidity
+    const filteredHumid = bucket.humidity.filter(v => {
+      if (v < humidBounds.low || v > humidBounds.high) {
+        if (mapping.humidityCol) columnStats[mapping.humidityCol].outliers++;
+        return false;
+      }
+      return true;
+    });
+    bucket.humidity = filteredHumid;
+  });
+
+  // 1.3 Chronological Range
   const allTimestamps = Array.from(hourlyDataMap.keys()).sort((a, b) => a - b);
   if (allTimestamps.length === 0) {
     throw new Error("No valid chronological data found in the dataset.");
@@ -438,6 +500,7 @@ export function executeFullPipeline(
     columns: headers.map(h => ({
       name: h,
       missingCount: columnStats[h]?.missing || 0,
+      outlierCount: columnStats[h]?.outliers || 0,
       missingPercent: +(((columnStats[h]?.missing || 0) / Math.max(1, totalRows)) * 100).toFixed(2),
       dataType: h.toLowerCase().includes('load') || h.toLowerCase().includes('mw') || h.toLowerCase().includes('temp') || h.toLowerCase().includes('humid')
         ? 'numeric'
@@ -1680,6 +1743,15 @@ export function executeFullPipeline(
   return {
     quality,
     stats,
+    cleanedData: parsedValidRows.map(r => ({
+      datetime: r.datetime.toISOString().slice(0, 16).replace('T', ' '),
+      mw: +r.mw.toFixed(2),
+      temp: +r.temp.toFixed(1),
+      humidity: +r.humidity.toFixed(1),
+      weather: r.weather,
+      holiday: r.holiday,
+      festival: r.festival,
+    })),
     demandOverview: {
       avgDemand: +avgDemand.toFixed(1),
       maxDemand: +maxDemand.toFixed(1),

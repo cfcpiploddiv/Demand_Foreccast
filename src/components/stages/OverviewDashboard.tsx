@@ -38,8 +38,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
     : 0;
 
   // Custom Predictor state requested in prompt
-  const [customWeather, setCustomWeather] = useState<string>('Sunny');
-  const [customHoliday, setCustomHoliday] = useState<string>('None');
+  const [customWeather, setCustomWeather] = useState<string>('Clear');
+  const [customHoliday, setCustomHoliday] = useState<string>('Working Day');
   const [customFestival, setCustomFestival] = useState<string>('None');
   const [customTemp, setCustomTemp] = useState<number>(28);
   const [customHumidity, setCustomHumidity] = useState<number>(55);
@@ -58,14 +58,14 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
     base += (customHumidity - 50) * -1.8;
 
     // 3. Weather impact
-    if (customWeather === 'Cloudy') base -= 35;
-    else if (customWeather === 'Rainy') base -= 65;
-    else if (customWeather === 'Windy') base += 20;
+    if (customWeather === 'Sunny') base += 15;
+    else if (customWeather === 'Rain') base -= 65;
+    else if (customWeather === 'Storm') base -= 110;
 
     // 4. Holiday impact
     if (customHoliday === 'Weekend') base -= 120;
-    else if (customHoliday === 'National Holiday') base -= 180;
-    else if (customHoliday === 'None') base += 80;
+    else if (customHoliday === 'Festival') base -= 180;
+    else if (customHoliday === 'Working Day') base += 80;
 
     // 5. Festival impact
     if (customFestival === 'Christmas') base += 110;
@@ -324,10 +324,10 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
                   onChange={e => setCustomWeather(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 focus:ring-1 focus:ring-cyan-500"
                 >
-                  <option value="Sunny">Clear / Sunny</option>
-                  <option value="Cloudy">Overcast / Cloudy</option>
-                  <option value="Rainy">Heavy Rain / Wet</option>
-                  <option value="Windy">High Wind / Gale</option>
+                  <option value="Clear">Clear</option>
+                  <option value="Sunny">Sunny</option>
+                  <option value="Rain">Rain</option>
+                  <option value="Storm">Storm</option>
                 </select>
               </div>
 
@@ -338,9 +338,9 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
                   onChange={e => setCustomHoliday(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 focus:ring-1 focus:ring-cyan-500"
                 >
-                  <option value="None">None (Standard Workday)</option>
-                  <option value="Weekend">Weekend Closure</option>
-                  <option value="National Holiday">National / Federal Holiday</option>
+                  <option value="Festival">Festival</option>
+                  <option value="Weekend">Weekend</option>
+                  <option value="Working Day">Working Day</option>
                 </select>
               </div>
             </div>

@@ -1,23 +1,55 @@
 import React from 'react';
-import { CheckCircle2, AlertCircle, FileSpreadsheet, BarChart2, Sparkles, RotateCcw, Check, CheckCircle } from 'lucide-react';
-import { DataQualityReport, DescriptiveStats } from '../../types/pipeline';
+import { CheckCircle2, AlertCircle, FileSpreadsheet, BarChart2, Sparkles, RotateCcw, Check, CheckCircle, Download } from 'lucide-react';
+import { CleanedRow, DataQualityReport, DescriptiveStats } from '../../types/pipeline';
 import { HistogramChart } from '../charts/HistogramChart';
 
 interface DataQualityStageProps {
   quality: DataQualityReport;
   stats: DescriptiveStats[];
+  cleanedData: CleanedRow[];
   correctedLogs: any[];
   onApplyCorrection: () => void;
   onUndoCorrection: () => void;
+  filename?: string;
 }
 
 export const DataQualityStage: React.FC<DataQualityStageProps> = ({
   quality,
   stats,
+  cleanedData,
   correctedLogs,
   onApplyCorrection,
   onUndoCorrection,
+  filename,
 }) => {
+  const handleExportCSV = () => {
+    if (!cleanedData || cleanedData.length === 0) return;
+    
+    const headers = ['timestamp', 'load_MW', 'Temp', 'Humidity', 'Weather Condition', 'Holiday Type', 'Festival Name'];
+    const rows = cleanedData.map(r => [
+      `"${r.datetime}"`,
+      r.mw,
+      r.temp,
+      r.humidity,
+      `"${r.weather}"`,
+      `"${r.holiday}"`,
+      `"${r.festival}"`
+    ].join(','));
+    
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    
+    const baseName = filename?.split('.')[0] || 'dataset';
+    link.setAttribute('download', `cleaned_${baseName}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-8">
       {/* Stage 1: Data Quality Check */}
@@ -75,6 +107,7 @@ export const DataQualityStage: React.FC<DataQualityStageProps> = ({
                   <th className="py-2 px-3 font-medium">Variable</th>
                   <th className="py-2 px-3 font-medium">Data Type</th>
                   <th className="py-2 px-3 font-medium text-right">Missing Count</th>
+                  <th className="py-2 px-3 font-medium text-right text-rose-400">Outliers</th>
                   <th className="py-2 px-3 font-medium text-right">Missing %</th>
                   <th className="py-2 px-3 font-medium text-center">Status</th>
                 </tr>
@@ -97,6 +130,19 @@ export const DataQualityStage: React.FC<DataQualityStageProps> = ({
                         ) : (
                           <span className={hasMissing ? 'text-amber-400 font-bold' : 'text-slate-400'}>
                             {col.missingCount}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono">
+                        {isCleaned && (col.outlierCount || 0) > 0 ? (
+                          <span className="flex items-center justify-end gap-1.5">
+                            <span className="text-rose-400 font-bold">{col.outlierCount}</span>
+                            <span className="text-slate-500 text-[10px]">→</span>
+                            <span className="text-emerald-400 font-bold">0</span>
+                          </span>
+                        ) : (
+                          <span className={(col.outlierCount || 0) > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>
+                            {col.outlierCount || 0}
                           </span>
                         )}
                       </td>
@@ -186,13 +232,22 @@ export const DataQualityStage: React.FC<DataQualityStageProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {correctedLogs.length > 0 && (
+              <button
+                onClick={handleExportCSV}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-xs font-semibold text-white transition-colors shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export Cleaned Dataset (.csv)
+              </button>
+            )}
             {correctedLogs.length > 0 ? (
               <button
                 onClick={onUndoCorrection}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition-colors shadow-sm"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                Undo Imputations / Restore Raw
+                Undo Imputations
               </button>
             ) : (
               <button
@@ -208,12 +263,17 @@ export const DataQualityStage: React.FC<DataQualityStageProps> = ({
 
         {correctedLogs.length > 0 ? (
           <div className="space-y-4">
-            <div className="bg-emerald-950/20 border border-emerald-900/60 p-3.5 rounded-xl text-xs flex items-center gap-3 text-emerald-300">
-              <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-              <div>
-                <span className="font-bold block"> Cleansing Audit Successful</span>
-                The raw dataset was cleaned using standardized time-series imputation rules. Autoregressive lags are now free from null gaps, dates have been aligned, and duplicates merged.
+            <div className="bg-emerald-950/20 border border-emerald-900/60 p-4 rounded-xl text-xs space-y-3 text-emerald-300">
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span className="font-bold text-sm">Data Cleansing Strategy & Academic Audit Implementation</span>
               </div>
+              <p className="leading-relaxed">
+                Statistically abnormal sensor observations were treated as missing values rather than directly deleting the corresponding records. 
+                Short-duration gaps (≤3 hours) were subsequently estimated using <strong>time-based linear interpolation</strong>, while longer gaps were handled 
+                using <strong>historical same-hour median values</strong>. This approach preserves the regular hourly time-series structure required for 
+                autoregressive lag engineering while reducing the influence of erroneous sensor readings.
+              </p>
             </div>
 
             {/* Before vs After audited table */}
