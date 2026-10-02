@@ -203,35 +203,58 @@ export function executeFullPipeline(
     };
   };
 
-  // --- STAGE 1: DATA QUALITY CHECK ---
-  const totalRows = rawRows.length;
-  let duplicateCount = 0;
-  const seenTimestamps = new Set<string>();
+  // --- PRE-PIPELINE: PARAMETER PARSING ---
+  const defaultHyperparameters: Hyperparameters = {
+    n_estimators: 100,
+    max_depth: 5,
+    learning_rate: 0.08,
+    subsample: 0.9,
+    colsample_bytree: 0.85,
+    min_child_weight: 3,
+    train_split: 0.8,
+    use_weather: true,
+    use_calendar: true,
+    use_cyclic: true,
+    selected_lags: [1, 2, 24, 168],
+    selected_algorithms: ['naive_24', 'lr', 'ridge', 'rf', 'xgb_base', 'xgb_tuned', 'lgbm', 'catboost', 'mlp', 'lstm', 'gru', 'sarimax'],
+    algorithm_selection_mode: 'auto',
+  };
 
+  const hp: Hyperparameters = {
+    ...defaultHyperparameters,
+    ...customHyperparameters,
+  };
+
+  // --- STAGE 1: DATA PARSING & TEMPORAL ALIGNMENT ---
+  // Filter out rows that are entirely empty or lack a timestamp (avoids counting trailing commas as records)
+  const validRawRows = rawRows.filter(row => {
+    const ts = (row[mapping.timestampCol] || '').toString().trim();
+    // A valid row must at least have something in the timestamp column
+    return ts !== '';
+  });
+
+  const totalRows = validRawRows.length;
+  let duplicateCount = 0;
+  
   const columnStats: { [col: string]: { missing: number; type: string } } = {};
   headers.forEach(h => {
     columnStats[h] = { missing: 0, type: 'string' };
   });
 
-  const parsedValidRows: {
-    datetime: Date;
-    mw: number;
-    temp: number;
-    humidity: number;
-    weather: string;
-    holiday: string;
-    festival: string;
-  }[] = [];
+  // 1.1 Initial Parse & Group by Hour
+  const hourlyDataMap = new Map<number, {
+    mw: number[];
+    temp: number[];
+    humidity: number[];
+    weather: string[];
+    holiday: string[];
+    festival: string[];
+  }>();
 
-  for (let i = 0; i < rawRows.length; i++) {
-    const row = rawRows[i];
+  validRawRows.forEach(row => {
     const tsVal = (row[mapping.timestampCol] || '').toString().trim();
-    if (seenTimestamps.has(tsVal)) {
-      duplicateCount++;
-    } else {
-      seenTimestamps.add(tsVal);
-    }
-
+    const dt = parseDateFlexible(tsVal);
+    
     headers.forEach(col => {
       const v = row[col];
       if (v === undefined || v === null || String(v).trim() === '') {
@@ -239,37 +262,179 @@ export function executeFullPipeline(
       }
     });
 
-    const dt = parseDateFlexible(tsVal);
-    const mwRaw = parseFloat(row[mapping.loadCol]);
+    if (dt) {
+      // Round to top of hour
+      const hourTs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate(), dt.getHours()).getTime();
+      const mw = parseFloat(row[mapping.loadCol]);
+      const temp = mapping.tempCol ? parseFloat(row[mapping.tempCol]) : NaN;
+      const humidity = mapping.humidityCol ? parseFloat(row[mapping.humidityCol]) : NaN;
 
-    if (dt && !isNaN(mwRaw)) {
-      const tempRaw = mapping.tempCol ? parseFloat(row[mapping.tempCol]) : NaN;
-      const humRaw = mapping.humidityCol ? parseFloat(row[mapping.humidityCol]) : NaN;
+      if (!hourlyDataMap.has(hourTs)) {
+        hourlyDataMap.set(hourTs, { mw: [], temp: [], humidity: [], weather: [], holiday: [], festival: [] });
+      }
+      
+      const bucket = hourlyDataMap.get(hourTs)!;
+      if (!isNaN(mw)) bucket.mw.push(mw);
+      if (!isNaN(temp)) bucket.temp.push(temp);
+      if (!isNaN(humidity)) bucket.humidity.push(humidity);
+      
+      if (mapping.weatherCol && row[mapping.weatherCol]) bucket.weather.push(String(row[mapping.weatherCol]).trim());
+      if (mapping.holidayCol && row[mapping.holidayCol]) bucket.holiday.push(String(row[mapping.holidayCol]).trim());
+      if (mapping.festivalCol && row[mapping.festivalCol]) bucket.festival.push(String(row[mapping.festivalCol]).trim());
+    }
+  });
 
-      parsedValidRows.push({
-        datetime: dt,
-        mw: mwRaw,
-        temp: isNaN(tempRaw) ? 28 : tempRaw,
-        humidity: isNaN(humRaw) ? 55 : humRaw,
-        weather: mapping.weatherCol && row[mapping.weatherCol] ? String(row[mapping.weatherCol]).trim() : 'Unknown',
-        holiday: mapping.holidayCol && row[mapping.holidayCol] ? String(row[mapping.holidayCol]).trim() : 'Unknown',
-        festival: mapping.festivalCol && row[mapping.festivalCol] ? String(row[mapping.festivalCol]).trim() : '',
+  // 1.2 Chronological Range
+  const allTimestamps = Array.from(hourlyDataMap.keys()).sort((a, b) => a - b);
+  if (allTimestamps.length === 0) {
+    throw new Error("No valid chronological data found in the dataset.");
+  }
+
+  const startTime = allTimestamps[0];
+  const endTime = allTimestamps[allTimestamps.length - 1];
+  const oneHour = 3600 * 1000;
+  const totalExpectedHours = Math.floor((endTime - startTime) / oneHour) + 1;
+
+  // 1.3 Consolidated Raw Series
+  interface Observation {
+    timestamp: number;
+    datetime: Date;
+    mw: number | null;
+    temp: number | null;
+    humidity: number | null;
+    weather: string | null;
+    holiday: string | null;
+    festival: string | null;
+    isImputed: boolean;
+    imputationMethod: string | null;
+  }
+
+  const rawSeries: Observation[] = [];
+  for (let t = startTime; t <= endTime; t += oneHour) {
+    const bucket = hourlyDataMap.get(t);
+    if (bucket) {
+      if (bucket.mw.length > 1) duplicateCount += (bucket.mw.length - 1);
+      
+      rawSeries.push({
+        timestamp: t,
+        datetime: new Date(t),
+        mw: bucket.mw.length > 0 ? bucket.mw.reduce((a, b) => a + b, 0) / bucket.mw.length : null,
+        temp: bucket.temp.length > 0 ? bucket.temp.reduce((a, b) => a + b, 0) / bucket.temp.length : null,
+        humidity: bucket.humidity.length > 0 ? bucket.humidity.reduce((a, b) => a + b, 0) / bucket.humidity.length : null,
+        weather: bucket.weather.length > 0 ? bucket.weather[0] : null,
+        holiday: bucket.holiday.length > 0 ? bucket.holiday[0] : null,
+        festival: bucket.festival.length > 0 ? bucket.festival[0] : null,
+        isImputed: false,
+        imputationMethod: null
+      });
+    } else {
+      rawSeries.push({
+        timestamp: t,
+        datetime: new Date(t),
+        mw: null, temp: null, humidity: null, weather: null, holiday: null, festival: null,
+        isImputed: true,
+        imputationMethod: 'Missing Hourly Record'
       });
     }
   }
 
-  // Sort chronologically
-  parsedValidRows.sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
+  // --- STAGE 2: ADVANCED IMPUTATION (TIME-AWARE) ---
+  
+  // 2.1 Calculate Training-Set Stats for Medians (To avoid leakage)
+  // Determine split point in raw series
+  const splitIdxRaw = Math.floor(rawSeries.length * hp.train_split);
+  
+  const getMedianByHour = (data: Observation[], key: 'mw' | 'temp' | 'humidity') => {
+    const hourlyBuckets: number[][] = Array.from({ length: 24 }, () => []);
+    data.slice(0, splitIdxRaw).forEach(obs => {
+      const val = obs[key];
+      if (val !== null) {
+        hourlyBuckets[obs.datetime.getHours()].push(val);
+      }
+    });
+    return hourlyBuckets.map(bucket => {
+      if (bucket.length === 0) return key === 'temp' ? 28 : key === 'humidity' ? 55 : 2500;
+      const sorted = [...bucket].sort((a, b) => a - b);
+      return quantile(sorted, 0.5);
+    });
+  };
+
+  const mwMedians = getMedianByHour(rawSeries, 'mw');
+  const tempMedians = getMedianByHour(rawSeries, 'temp');
+  const humidityMedians = getMedianByHour(rawSeries, 'humidity');
+
+  // 2.2 Numerical Imputation Loop
+  const finalSeries: Observation[] = rawSeries.map(obs => ({ ...obs, datetime: new Date(obs.datetime) }));
+  let interpolatedCount = 0;
+  let medianFilledCount = 0;
+
+  const imputeColumn = (key: 'mw' | 'temp' | 'humidity', medians: number[]) => {
+    let i = 0;
+    while (i < finalSeries.length) {
+      if (finalSeries[i][key] === null) {
+        let j = i;
+        while (j < finalSeries.length && finalSeries[j][key] === null) {
+          j++;
+        }
+        const gapSize = j - i;
+        
+        if (gapSize <= 3 && i > 0 && j < finalSeries.length) {
+          // Time Interpolation
+          const startVal = finalSeries[i - 1][key]!;
+          const endVal = finalSeries[j][key]!;
+          for (let k = 0; k < gapSize; k++) {
+            finalSeries[i + k][key] = startVal + (endVal - startVal) * ((k + 1) / (gapSize + 1));
+            finalSeries[i + k].isImputed = true;
+            finalSeries[i + k].imputationMethod = 'Time Interpolation (Short Gap)';
+          }
+          interpolatedCount += gapSize;
+        } else {
+          // Historical Same-Hour Median
+          for (let k = 0; k < gapSize; k++) {
+            const h = finalSeries[i + k].datetime.getHours();
+            finalSeries[i + k][key] = medians[h];
+            finalSeries[i + k].isImputed = true;
+            finalSeries[i + k].imputationMethod = 'Same-Hour Historical Median (Long Gap)';
+          }
+          medianFilledCount += gapSize;
+        }
+        i = j;
+      } else {
+        i++;
+      }
+    }
+  };
+
+  imputeColumn('mw', mwMedians);
+  imputeColumn('temp', tempMedians);
+  imputeColumn('humidity', humidityMedians);
+
+  // 2.3 Categorical Imputation
+  finalSeries.forEach(obs => {
+    if (!obs.weather) obs.weather = 'Unknown';
+    if (!obs.holiday) obs.holiday = 'Unknown';
+    if (!obs.festival) obs.festival = 'None';
+  });
+
+  const parsedValidRows = finalSeries.map(obs => ({
+    datetime: obs.datetime,
+    mw: obs.mw!,
+    temp: obs.temp!,
+    humidity: obs.humidity!,
+    weather: obs.weather!,
+    holiday: obs.holiday!,
+    festival: obs.festival!
+  }));
 
   const quality: DataQualityReport = {
     totalRows,
     duplicateRows: duplicateCount,
-    dateRange: parsedValidRows.length > 0
-      ? {
-          start: parsedValidRows[0].datetime.toISOString().slice(0, 16).replace('T', ' '),
-          end: parsedValidRows[parsedValidRows.length - 1].datetime.toISOString().slice(0, 16).replace('T', ' '),
-        }
-      : null,
+    temporalGapsFilled: medianFilledCount + interpolatedCount,
+    totalImputedPoints: medianFilledCount + interpolatedCount,
+    dateRange: {
+      start: parsedValidRows[0].datetime.toISOString().slice(0, 16).replace('T', ' '),
+      end: parsedValidRows[parsedValidRows.length - 1].datetime.toISOString().slice(0, 16).replace('T', ' '),
+    },
     columns: headers.map(h => ({
       name: h,
       missingCount: columnStats[h]?.missing || 0,
@@ -280,8 +445,8 @@ export function executeFullPipeline(
     })),
   };
 
-  // --- STAGE 2: DESCRIPTIVE STATISTICS ---
-  const numericFields: { key: keyof typeof parsedValidRows[0]; label: string }[] = [
+  // --- STAGE 3: DESCRIPTIVE STATISTICS ---
+  const numericFields: { key: 'mw' | 'temp' | 'humidity'; label: string }[] = [
     { key: 'mw', label: 'Electricity Demand (MW)' },
     { key: 'temp', label: 'Temperature (°C)' },
     { key: 'humidity', label: 'Humidity (%)' },
@@ -290,22 +455,7 @@ export function executeFullPipeline(
   const stats: DescriptiveStats[] = numericFields.map(f => {
     const vals = parsedValidRows.map(r => r[f.key] as number).sort((a, b) => a - b);
     const n = vals.length;
-    if (n === 0) {
-      return {
-        column: f.label,
-        count: 0,
-        mean: 0,
-        std: 0,
-        min: 0,
-        q25: 0,
-        median: 0,
-        q75: 0,
-        max: 0,
-        skewness: 0,
-        histogram: [],
-      };
-    }
-
+    
     const min = vals[0];
     const max = vals[n - 1];
     const sum = vals.reduce((a, b) => a + b, 0);
@@ -313,12 +463,10 @@ export function executeFullPipeline(
     const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
     const std = Math.sqrt(variance);
 
-    // Skewness
     const skewness = std > 1e-4
       ? (vals.reduce((a, b) => a + ((b - mean) / std) ** 3, 0) / n)
       : 0;
 
-    // Histogram (20 bins)
     const numBins = 20;
     const binWidth = (max - min) / numBins || 1;
     const bins = Array.from({ length: numBins }, (_, bi) => ({
@@ -349,22 +497,19 @@ export function executeFullPipeline(
     };
   });
 
-  // --- STAGE 3: DEMAND EDA (Boxplots & Time Profile) ---
+  // --- STAGE 4: DEMAND EDA (Boxplots & Time Profile) ---
   const mwVals = parsedValidRows.map(r => r.mw);
   const avgDemand = mwVals.length > 0 ? mwVals.reduce((a, b) => a + b, 0) / mwVals.length : 0;
   const maxDemand = mwVals.length > 0 ? Math.max(...mwVals) : 0;
   const minDemand = mwVals.length > 0 ? Math.min(...mwVals) : 0;
 
-  // Hourly boxplots (0 to 23)
   const hourlyBuckets: { [h: number]: number[] } = {};
   for (let h = 0; h < 24; h++) hourlyBuckets[h] = [];
 
-  // Day of week buckets (0 to 6)
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const dayBuckets: { [d: number]: number[] } = {};
   for (let d = 0; d < 7; d++) dayBuckets[d] = [];
 
-  // Month buckets (1 to 12)
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthBuckets: { [m: number]: number[] } = {};
   for (let m = 0; m < 12; m++) monthBuckets[m] = [];
@@ -404,7 +549,7 @@ export function executeFullPipeline(
     ...calcBoxplot(monthBuckets[m]),
   }));
 
-  // --- STAGE 4: WEATHER & CALENDAR EDA ---
+  // --- STAGE 5: WEATHER & CALENDAR EDA ---
   const weatherCondMap: { [w: string]: number[] } = {};
   const holidayMap: { [h: string]: number[] } = {};
   const festivalMap: { [f: string]: number[] } = {};
@@ -422,7 +567,6 @@ export function executeFullPipeline(
     }
   });
 
-  // Calculate Pearson correlations
   const calcCorrelation = (x: number[], y: number[]) => {
     const n = Math.min(x.length, y.length);
     if (n === 0) return 0;
@@ -451,7 +595,6 @@ export function executeFullPipeline(
     parsedValidRows.map(r => r.mw)
   );
 
-  // Scatter samples (downsample to 400 points for crisp fast rendering)
   const sampleStep = Math.max(1, Math.floor(parsedValidRows.length / 300));
   const tempScatterSample: { temp: number; mw: number }[] = [];
   const humidityScatterSample: { humidity: number; mw: number }[] = [];
@@ -482,7 +625,7 @@ export function executeFullPipeline(
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 
-  // --- STAGE 5: CORRELATION MATRIX ---
+  // --- STAGE 6: CORRELATION MATRIX ---
   const corrFeatures = ['MW', 'Temp', 'Humidity', 'Hour', 'Day_of_Week', 'Month'];
   const featureVectors: { [f: string]: number[] } = {
     MW: parsedValidRows.map(r => r.mw),
@@ -510,18 +653,15 @@ export function executeFullPipeline(
     }))
     .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
 
-  // --- STAGE 6: FEATURE ENGINEERING & DATA LEAKAGE AUDIT ---
-  // Resample & construct lags and rolling statistics
+  // --- STAGE 7: FEATURE ENGINEERING & DATA LEAKAGE AUDIT ---
   const processedRecords: ProcessedRecord[] = [];
 
   for (let i = 0; i < parsedValidRows.length; i++) {
-    // Need at least 168 hours of historical context for Lag_168, and i < length - 1 for Target_MW (shifted -1)
     if (i < 168 || i >= parsedValidRows.length - 1) continue;
 
     const cur = parsedValidRows[i];
     const next = parsedValidRows[i + 1];
 
-    // Rolling 24 mean and std using only past observations (i-24 to i-1)
     let rollSum = 0;
     let rollSqSum = 0;
     for (let k = 1; k <= 24; k++) {
@@ -597,29 +737,7 @@ export function executeFullPipeline(
     },
   ];
 
-  // Hyperparameters
-  const defaultHyperparameters: Hyperparameters = {
-    n_estimators: 100,
-    max_depth: 5,
-    learning_rate: 0.08,
-    subsample: 0.9,
-    colsample_bytree: 0.85,
-    min_child_weight: 3,
-    train_split: 0.8,
-    use_weather: true,
-    use_calendar: true,
-    use_cyclic: true,
-    selected_lags: [1, 2, 24, 168],
-    selected_algorithms: ['naive_24', 'lr', 'ridge', 'rf', 'xgb_base', 'xgb_tuned', 'lgbm', 'catboost', 'mlp', 'lstm', 'gru', 'sarimax'],
-    algorithm_selection_mode: 'auto',
-  };
-
-  const hp: Hyperparameters = {
-    ...defaultHyperparameters,
-    ...customHyperparameters,
-  };
-
-  // Chronological Split
+  // Split logic already uses hp.train_split
   const splitIdx = Math.floor(processedRecords.length * hp.train_split);
   const trainRecords = processedRecords.slice(0, splitIdx);
   const testRecords = processedRecords.slice(splitIdx);

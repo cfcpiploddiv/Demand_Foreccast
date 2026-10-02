@@ -29,6 +29,8 @@ export interface DataQualityReport {
     missingPercent: number;
     dataType: string;
   }[];
+  temporalGapsFilled?: number;
+  totalImputedPoints?: number;
 }
 
 export interface DescriptiveStats {

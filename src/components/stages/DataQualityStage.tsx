@@ -37,9 +37,15 @@ export const DataQualityStage: React.FC<DataQualityStageProps> = ({
 
           <div className="flex items-center gap-3 text-xs">
             <div className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
-              <span className="text-slate-400">Total Rows: </span>
+              <span className="text-slate-400">Rows in File: </span>
               <span className="font-mono text-cyan-300 font-bold">{quality.totalRows.toLocaleString()}</span>
             </div>
+            {quality.temporalGapsFilled !== undefined && quality.temporalGapsFilled > 0 && (
+              <div className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                <span className="text-slate-400">Timeline Gaps Filled: </span>
+                <span className="font-mono text-amber-400 font-bold">+{quality.temporalGapsFilled.toLocaleString()}</span>
+              </div>
+            )}
             <div className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
               <span className="text-slate-400">Duplicate Rows: </span>
               <span className={`font-mono font-bold ${quality.duplicateRows > 0 || correctedLogs.length > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
@@ -257,6 +263,9 @@ export const DataQualityStage: React.FC<DataQualityStageProps> = ({
               [Stage 2]
             </span>
             <h3 className="text-lg font-bold text-white">Descriptive Statistics & Feature Distributions</h3>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+              Final Processed Count: {stats[0]?.count.toLocaleString()} observations
+            </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
             Summary statistics (mean, std, min, quartiles, max, skewness) and KDE distribution curves (Python df.describe())

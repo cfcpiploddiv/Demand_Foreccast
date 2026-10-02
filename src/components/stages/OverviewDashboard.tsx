@@ -246,12 +246,12 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ results, o
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-md">
-          <span className="text-[11px] text-slate-400 uppercase tracking-wider block font-semibold">Accuracy Gain</span>
+          <span className="text-[11px] text-slate-400 uppercase tracking-wider block font-semibold text-xs">Model Accuracy</span>
           <div className="text-xl font-bold font-mono text-cyan-400 mt-1 flex items-center gap-1">
-            <TrendingUp className="w-4 h-4" />
-            +{maeImprovement}%
+            <CheckCircle className="w-4 h-4" />
+            {(100 - bestModel.metrics.mape).toFixed(1)}%
           </div>
-          <span className="text-[11px] text-slate-400 block mt-0.5">vs Naive Persistence</span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">Absolute Precision (1-MAPE)</span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-md">
