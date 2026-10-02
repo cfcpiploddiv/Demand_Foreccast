@@ -1,0 +1,6 @@
+{
+  "name": "Electricity Demand Forecasting Studio",
+  "description": "Upload datasets, execute complete end-to-end Python ML energy demand forecasting pipeline with EDA, feature engineering, real-time hyperparameter tuning, model comparison, peak demand and error analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
