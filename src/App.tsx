@@ -74,27 +74,12 @@ export default function App() {
       { column: 'Festival Name', before: 'Inconsistent "none" / blank records', action: 'Mapped empty fields to "None" keyword for categorical embedding', after: 'Clean categorical series', status: 'Standardized' },
     ];
     setCorrectedLogs(logs);
-
-    if (pipelineResults) {
-      const updatedResults = {
-        ...pipelineResults,
-        quality: {
-          ...pipelineResults.quality,
-          duplicateRows: 0,
-          columns: pipelineResults.quality.columns.map(c => ({
-            ...c,
-            missingCount: 0,
-            missingPercent: 0
-          }))
-        }
-      };
-      setPipelineResults(updatedResults);
-    }
+    runPipeline(csvContent, mapping, hyperparameters, true);
   };
 
   const handleUndoCorrection = () => {
     setCorrectedLogs([]);
-    runPipeline(csvContent, mapping, hyperparameters);
+    runPipeline(csvContent, mapping, hyperparameters, false);
   };
 
   const handleResetAll = () => {
@@ -108,12 +93,13 @@ export default function App() {
   const runPipeline = (
     csv: string,
     curMapping: ColumnMapping,
-    hp: Hyperparameters
+    hp: Hyperparameters,
+    isCleanedOverride?: boolean
   ) => {
     setIsRunning(true);
     setTimeout(() => {
       try {
-        const results = executeFullPipeline(csv, curMapping, hp);
+        const results = executeFullPipeline(csv, curMapping, hp, isCleanedOverride ?? correctedLogs.length > 0);
         setPipelineResults(results);
       } catch (err: any) {
         console.error('Pipeline error:', err);
@@ -140,7 +126,7 @@ export default function App() {
     setIsTraining(true);
     setTimeout(() => {
       try {
-        const results = executeFullPipeline(csvContent, mapping, newParams);
+        const results = executeFullPipeline(csvContent, mapping, newParams, correctedLogs.length > 0);
         setPipelineResults(results);
       } catch (err: any) {
         console.error('Tuning error:', err);
